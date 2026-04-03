@@ -2,6 +2,8 @@
 
 ## Current Architecture Overview
 
+![Architecture](../diagrams/ai-app-architecture.png)
+
 Based on the existing architecture diagram, the platform demonstrates a solid foundation with the following components:
 
 ### Existing Components
