@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: otel-demo
-          image: ghcr.io/open-telemetry/opentelemetry-demo:latest
+          image: otel/demo:latest
           ports:
             - containerPort: 8080
           env:
