@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: otel-demo
-          image: otel/demo:latest
+          image: otel/demo:latest-quote
           ports:
             - containerPort: 8080
           env:
