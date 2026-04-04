@@ -1,0 +1,38 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: promtail
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: promtail
+    targetRevision: 6.15.3   # stable version
+
+    helm:
+      values: |
+        config:
+          clients:
+            - url: http://lgtm.observibility:3100/loki/api/v1/push
+
+        extraScrapeConfigs: |
+          - job_name: kubernetes-pods
+            kubernetes_sd_configs:
+              - role: pod
+
+            relabel_configs:
+              - source_labels: [__meta_kubernetes_pod_label_app]
+                target_label: app
+
+              - source_labels: [__meta_kubernetes_namespace]
+                target_label: namespace
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observibility
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
