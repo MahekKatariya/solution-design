@@ -49,7 +49,7 @@ data:
         labels:
           app: "demo-app"
         static_configs:
-          - targets: ['demo-app.observibility:8000']
+          - targets: ['demo-app.default:8000']
 ---
 apiVersion: apps/v1
 kind: Deployment
