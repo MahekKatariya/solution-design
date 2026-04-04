@@ -15,6 +15,9 @@ data:
   prometheus.yaml: |
 
     global:
+      scrape_interval: 15s
+      scrape_timeout: 10s
+      evaluation_interval: 15s
       scrape_native_histograms: true
     otlp:
       keep_identifying_resource_attributes: true
