@@ -18,5 +18,5 @@ spec:
           ports:
             - containerPort: 8000
           env:
-            - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: http://lgtm.observibility:4318
+            - name: OTLP_GRPC_ENDPOINT
+              value: http://lgtm.observibility:4317
