@@ -1,22 +1,22 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: otel-demo
+  name: demo-app
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: otel-demo
+      app: demo-app
   template:
     metadata:
       labels:
-        app: otel-demo
+        app: demo-app
     spec:
       containers:
-        - name: otel-demo
-          image: otel/demo:latest-quote
+        - name: app
+          image: ghcr.io/blueswen/fastapi-observability:latest
           ports:
-            - containerPort: 8080
+            - containerPort: 8000
           env:
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: http://tempo:4317
+              value: http://lgtm:4317
