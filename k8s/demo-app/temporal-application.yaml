@@ -51,8 +51,7 @@ spec:
           enabled: false
         
         prometheus:
-          enabled: false
-        
+          enabled: false        
         grafana:
           enabled: false
 
