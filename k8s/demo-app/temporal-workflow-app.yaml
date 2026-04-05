@@ -13,21 +13,6 @@ spec:
       labels:
         app: temporal-worker
     spec:
-      initContainers:
-        - name: wait-for-namespace
-          image: temporalio/admin-tools:latest
-          command:
-            - /bin/bash
-            - -c
-            - |
-              until temporal operator namespace describe default 2>/dev/null; do
-                echo "Waiting for namespace 'default' to be created..."
-                sleep 2
-              done
-              echo "Namespace 'default' is ready"
-          env:
-            - name: TEMPORAL_CLI_ADDRESS
-              value: "temporal-frontend.temporal:7233"
       containers:
         - name: worker
           image: python:3.11-slim
@@ -161,21 +146,6 @@ spec:
       labels:
         app: workflow-starter
     spec:
-      initContainers:
-        - name: wait-for-namespace
-          image: temporalio/admin-tools:latest
-          command:
-            - /bin/bash
-            - -c
-            - |
-              until temporal operator namespace describe default 2>/dev/null; do
-                echo "Waiting for namespace 'default' to be created..."
-                sleep 2
-              done
-              echo "Namespace 'default' is ready"
-          env:
-            - name: TEMPORAL_CLI_ADDRESS
-              value: "temporal-frontend.temporal:7233"
       containers:
         - name: starter
           image: python:3.11-slim
