@@ -26,29 +26,31 @@ spec:
             logLevel: info
             
             persistence:
-              datastores:
-                default:
-                  sql:
-                    driver: "postgres"
-                    host: "postgres.temporal.svc.cluster.local"
-                    port: 5432
-                    database: "temporal"
-                    user: "temporal"
-                    password: "temporal123"
-                    maxConns: 20
-                    maxIdleConns: 20
-                    maxConnLifetime: "1h"
-                visibility:
-                  sql:
-                    driver: "postgres"
-                    host: "postgres.temporal.svc.cluster.local"
-                    port: 5432
-                    database: "temporal_visibility"
-                    user: "temporal"
-                    password: "temporal123"
-                    maxConns: 10
-                    maxIdleConns: 10
-                    maxConnLifetime: "1h"
+              defaultStore: default
+              default:
+                driver: 'sql'
+                sql:
+                  driver: "postgres"
+                  host: "postgres.temporal.svc.cluster.local"
+                  port: 5432
+                  database: "temporal"
+                  user: "temporal"
+                  password: "temporal123"
+                  maxConns: 20
+                  maxIdleConns: 20
+                  maxConnLifetime: "1h"
+              visibility:
+                driver: 'sql'
+                sql:
+                  driver: "postgres"
+                  host: "postgres.temporal.svc.cluster.local"
+                  port: 5432
+                  database: "temporal_visibility"
+                  user: "temporal"
+                  password: "temporal123"
+                  maxConns: 10
+                  maxIdleConns: 10
+                  maxConnLifetime: "1h"
         
         web:
           enabled: true
