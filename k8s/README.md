@@ -352,13 +352,263 @@ wait
 | Request Rate | `sum(rate(fastapi_requests_duration_seconds_count{job="demo-app"}[5m]))` |
 | Error Rate | `sum(rate(fastapi_requests_duration_seconds_count{job="demo-app",status=~"5.."}[5m])) / sum(rate(fastapi_requests_duration_seconds_count{job="demo-app"}[5m]))` |
 
+## Temporal Workflow Integration
+
+This setup includes Temporal workflow engine integration for building reliable, scalable distributed applications.
+
+### Temporal Components
+
+The Temporal integration includes:
+
+| Component | Description | Port |
+|-----------|-------------|------|
+| Temporal Server | Core workflow engine | 7233 |
+| Temporal Web UI | Dashboard for workflows | 8080 |
+| PostgreSQL | Temporal persistence layer | 5432 |
+| Temporal Worker | Sample workflow worker | - |
+
+
+### Accessing Temporal Services
+
+#### Temporal Web UI
+
+```bash
+# Port-forward Temporal Web UI
+kubectl port-forward svc/temporal-web -n temporal 8080:8080
+```
+
+Access Temporal Web UI at: http://localhost:8080
+
+#### Temporal Server (gRPC)
+
+```bash
+# Port-forward Temporal Server
+kubectl port-forward svc/temporal-frontend -n temporal 7233:7233
+```
+
+Connect to Temporal Server at: `localhost:7233`
+
+### Sample Workflow Application
+
+The included sample demonstrates:
+
+- **Workflow Definition**: [`SampleWorkflow`](k8s/demo-app/temporal-workflow-app.yaml:47) with two activities
+- **Activities**: `say_hello` and `process_data` with timeout configurations
+- **Worker**: Processes workflows from the `sample-task-queue`
+- **Starter**: Automatically starts workflows every 30 seconds
+
+#### Workflow Components
+
+```python
+@workflow.defn
+class SampleWorkflow:
+    @workflow.run
+    async def run(self, name: str) -> str:
+        # Execute activities with timeouts
+        greeting = await workflow.execute_activity(
+            say_hello, name, start_to_close_timeout=timedelta(seconds=10)
+        )
+        processed = await workflow.execute_activity(
+            process_data, f"data for {name}", start_to_close_timeout=timedelta(seconds=30)
+        )
+        return f"{greeting} {processed}"
+```
+
+### Monitoring Workflows
+
+#### View Workflow Executions
+
+1. Access Temporal Web UI at http://localhost:8080
+2. Navigate to **Workflows** to see running and completed executions
+3. Click on any workflow to see detailed execution history
+
+#### Check Worker Logs
+
+```bash
+# View worker logs
+kubectl logs -l app=temporal-worker -n default
+
+# View workflow starter logs
+kubectl logs -l app=workflow-starter -n default
+```
+
+### Integrating with Your Application
+
+#### Connect to Temporal from Your App
+
+Update your application deployment to connect to Temporal:
+
+```yaml
+env:
+  - name: TEMPORAL_HOST
+    value: "temporal-frontend.temporal:7233"
+  - name: TEMPORAL_NAMESPACE
+    value: "default"
+```
+
+#### Python Client Example
+
+```python
+from temporalio.client import Client
+
+async def main():
+    client = await Client.connect("temporal-frontend.temporal:7233")
+    
+    # Start a workflow
+    handle = await client.start_workflow(
+        "YourWorkflow",
+        "input-data",
+        id="unique-workflow-id",
+        task_queue="your-task-queue",
+    )
+    
+    # Get result
+    result = await handle.result()
+    print(f"Workflow result: {result}")
+```
+
+### Temporal Observability Integration
+
+Temporal is fully integrated with your existing LGTM observability stack:
+
+#### Metrics Integration
+
+Temporal metrics are automatically exposed and integrated with your existing Prometheus:
+
+```yaml
+# Temporal metrics are exposed on port 9090 and can be scraped by your existing Prometheus
+# Add this scrape config to your Prometheus configuration:
+- job_name: 'temporal-server'
+  static_configs:
+    - targets: ['temporal-frontend.temporal:9090']
+  scrape_interval: 15s
+  metrics_path: /metrics
+
+# Key Temporal metrics to monitor:
+# - temporal_request_latency_bucket (request latency histograms)
+# - temporal_request_count (total requests)
+# - temporal_workflow_task_queue_depth (task queue depth)
+# - temporal_activity_task_queue_depth (activity queue depth)
+```
+
+#### Tracing Integration
+
+Temporal and the sample applications automatically send traces to your existing Tempo instance:
+
+```yaml
+# All components send OpenTelemetry traces to:
+# Endpoint: http://lgtm.observibility:4317
+
+# Service Names:
+# - temporal-server (Temporal server internal operations)
+# - temporal-worker (Workflow and activity execution)
+# - temporal-workflow-starter (Workflow initiation)
+
+# Traces include:
+# - Complete workflow execution lifecycle
+# - Individual activity execution with input/output
+# - Workflow start and completion events
+# - Activity retry attempts and failures
+# - Internal Temporal service calls
+# - Database operations
+# - Custom business logic spans
+```
+
+#### Enhanced Tracing Features
+
+The sample applications include comprehensive tracing:
+
+**Workflow Starter Traces:**
+- `workflow_execution_cycle` - Complete workflow lifecycle
+- `start_workflow` - Workflow initiation with metadata
+- `await_workflow_result` - Result waiting and retrieval
+
+**Worker Activity Traces:**
+- `say_hello_activity` - Greeting activity with input/output
+- `process_data_activity` - Data processing with duration metrics
+
+**Trace Attributes:**
+- `workflow.id` - Unique workflow identifier
+- `workflow.type` - Workflow class name
+- `workflow.status` - Execution status (completed/failed)
+- `activity.input` - Activity input parameters
+- `activity.output` - Activity return values
+- `processing.duration_seconds` - Processing time
+- `error.message` - Error details for failed executions
+
+#### Viewing Temporal Traces in Grafana
+
+1. Access Grafana at http://localhost:3000
+2. Navigate to **Explore** → **Tempo**
+3. Search for traces with:
+   - Service name: `temporal-server`
+   - Operation: `workflow.execute` or `activity.execute`
+4. View detailed workflow execution traces showing:
+   - Workflow start and completion
+   - Activity executions and retries
+   - Task queue operations
+   - Database interactions
+
+#### Logs Integration
+
+Temporal logs are automatically collected by Promtail and sent to Loki:
+
+```bash
+# View Temporal server logs in Grafana
+# Navigate to Explore → Loki
+# Query: {namespace="temporal", app="temporal"}
+
+# Or via kubectl:
+kubectl logs -l app.kubernetes.io/name=temporal -n temporal
+```
+
+The configuration disables Temporal's built-in Prometheus to avoid conflicts with your existing observability stack.
+
+### Troubleshooting Temporal
+
+#### Temporal Server Not Starting
+
+```bash
+# Check Temporal server logs
+kubectl logs -l app.kubernetes.io/name=temporal -n temporal
+
+# Check PostgreSQL connectivity
+kubectl exec -it deployment/temporal-postgresql -n temporal -- psql -U temporal -d temporal -c '\l'
+```
+
+#### Workflows Not Executing
+
+```bash
+# Check worker registration
+kubectl logs -l app=temporal-worker -n default
+
+# Verify task queue in Temporal Web UI
+# Navigate to Task Queues section
+```
+
+#### Database Connection Issues
+
+```bash
+# Check PostgreSQL status
+kubectl get pods -n temporal -l app.kubernetes.io/name=postgresql
+
+# Test database connection
+kubectl exec -it deployment/temporal-postgresql -n temporal -- \
+  psql -U temporal -d temporal -c 'SELECT version();'
+```
+
 ## Cleanup
 
 ```bash
 # Delete applications from ArgoCD
 kubectl delete -f k8s/argocd/bootstrap/application.yaml
 
-# Delete all resources
+# Delete Temporal resources
+kubectl delete -f k8s/demo-app/temporal-application.yaml
+kubectl delete -f k8s/demo-app/temporal-workflow-app.yaml
+kubectl delete namespace temporal
+
+# Delete all other resources
 kubectl delete namespace observibility
 kubectl delete deployment demo-app
 kubectl delete service demo-app
