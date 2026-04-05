@@ -43,7 +43,9 @@ spec:
 
         cassandra:
           config:
-            cluster_size: 1    
+            cluster_size: 1   
+          service:
+            type: ClusterIP 
         mysql:
           enabled: false
         
