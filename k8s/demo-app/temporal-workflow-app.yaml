@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: worker
-          image: temporalio/samples-python:latest
+          image: python:3.11-slim
           env:
             - name: TEMPORAL_HOST
               value: "temporal-frontend.temporal:7233"
@@ -28,9 +28,11 @@ spec:
             - name: OTEL_RESOURCE_ATTRIBUTES
               value: "service.name=temporal-worker,service.version=1.0.0"
           command:
-            - python
+            - /bin/bash
             - -c
             - |
+              pip install temporalio opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp opentelemetry-instrumentation-temporalio
+              python -c "
               import asyncio
               import logging
               import os
@@ -125,6 +127,7 @@ spec:
               
               if __name__ == "__main__":
                   asyncio.run(main())
+              "
           resources:
             requests:
               memory: "128Mi"
@@ -151,7 +154,7 @@ spec:
     spec:
       containers:
         - name: starter
-          image: temporalio/samples-python:latest
+          image: python:3.11-slim
           env:
             - name: TEMPORAL_HOST
               value: "temporal-frontend.temporal:7233"
@@ -164,9 +167,11 @@ spec:
             - name: OTEL_RESOURCE_ATTRIBUTES
               value: "service.name=temporal-workflow-starter,service.version=1.0.0"
           command:
-            - python
+            - /bin/bash
             - -c
             - |
+              pip install temporalio opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp opentelemetry-instrumentation-temporalio
+              python -c "
               import asyncio
               import logging
               import os
@@ -253,6 +258,7 @@ spec:
               
               if __name__ == "__main__":
                   asyncio.run(main())
+              "
           resources:
             requests:
               memory: "128Mi"
