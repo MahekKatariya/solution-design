@@ -1,31 +1,3 @@
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: create-temporal-namespace
-  namespace: default
-  annotations:
-    argocd.argoproj.io/hook: PreSync
-spec:
-  template:
-    spec:
-      restartPolicy: OnFailure
-      containers:
-        - name: create-namespace
-          image: temporalio/admin-tools:latest
-          command:
-            - /bin/bash
-            - -c
-            - |
-              until temporal operator namespace describe default 2>/dev/null; do
-                echo "Creating namespace 'default'..."
-                temporal operator namespace create default --retention 7d || true
-                sleep 2
-              done
-              echo "Namespace 'default' is ready"
-          env:
-            - name: TEMPORAL_CLI_ADDRESS
-              value: "temporal-frontend.temporal:7233"
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
