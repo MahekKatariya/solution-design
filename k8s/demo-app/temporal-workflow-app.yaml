@@ -32,7 +32,7 @@ spec:
             - -c
             - |
               pip install temporalio opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp
-              python -c '
+              cat > /tmp/worker.py << 'EOF'
               import asyncio
               import logging
               import os
@@ -120,7 +120,8 @@ spec:
 
               if __name__ == "__main__":
                   asyncio.run(main())
-              '
+              EOF
+              python /tmp/worker.py
           resources:
             requests:
               memory: "128Mi"
@@ -164,7 +165,7 @@ spec:
             - -c
             - |
               pip install temporalio opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp
-              python -c '
+              cat > /tmp/starter.py << 'EOF'
               import asyncio
               import logging
               import os
@@ -247,7 +248,8 @@ spec:
 
               if __name__ == "__main__":
                   asyncio.run(main())
-              '
+              EOF
+              python /tmp/starter.py
           resources:
             requests:
               memory: "128Mi"
