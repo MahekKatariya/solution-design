@@ -24,13 +24,6 @@ spec:
 
           config:
             logLevel: info
-        server:
-          replicaCount: 1
-          image:
-            repository: temporalio/server
-          
-          config:
-            logLevel: "info"
         
         web:
           enabled: true
@@ -48,10 +41,6 @@ spec:
           update:
             enabled: true
         
-        cassandra:
-          enabled: true
-          config:
-            cluster_size: 1
         
         mysql:
           enabled: false
