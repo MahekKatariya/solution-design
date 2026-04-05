@@ -1,10 +1,3 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: temporal
-  annotations:
-    argocd.argoproj.io/sync-wave: '-10'
----
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -16,9 +9,14 @@ spec:
   source:
     repoURL: https://go.temporal.io/helm-charts
     chart: temporal
-    targetRevision: 0.37.0
+    targetRevision: 0.31.0
     helm:
       values: |
+        server:
+          replicaCount: 1
+
+          config:
+            logLevel: info
         server:
           replicaCount: 1
           image:
@@ -26,80 +24,27 @@ spec:
           
           config:
             logLevel: "info"
-            
-            persistence:
-              defaultStore: default
-              visibilityStore: visibility
-              numHistoryShards: 4
-              datastores:
-                default:
-                  sql:
-                    driver: "postgres"
-                    host: "temporal-postgresql"
-                    port: 5432
-                    database: "temporal"
-                    user: "temporal"
-                    password: "temporal"
-                    maxConns: 20
-                    maxIdleConns: 20
-                    maxConnLifetime: "1h"
-                visibility:
-                  sql:
-                    driver: "postgres"
-                    host: "temporal-postgresql"
-                    port: 5432
-                    database: "temporal_visibility"
-                    user: "temporal"
-                    password: "temporal"
-                    maxConns: 10
-                    maxIdleConns: 10
-                    maxConnLifetime: "1h"
-            
-            # Metrics configuration
-            metrics:
-              prometheus:
-                timerType: "histogram"
         
         web:
           enabled: true
           replicaCount: 1
-          image:
-            repository: temporalio/ui
-            tag: 2.21.3
           service:
             type: ClusterIP
             port: 8080
-          ingress:
-            enabled: false
         
         postgresql:
-          enabled: true
-          auth:
-            username: temporal
-            password: temporal
-            database: temporal
-          primary:
-            persistence:
-              enabled: true
-              size: 10Gi
-            resources:
-              requests:
-                memory: 256Mi
-                cpu: 250m
-              limits:
-                memory: 512Mi
-                cpu: 500m
+          enabled: false
         
         schema:
           setup:
             enabled: true
-            backoffLimit: 100
           update:
             enabled: true
-            backoffLimit: 100
         
         cassandra:
-          enabled: false
+          enabled: true
+          config:
+            cluster_size: 1
         
         mysql:
           enabled: false
