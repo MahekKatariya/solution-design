@@ -364,9 +364,57 @@ The Temporal integration includes:
 |-----------|-------------|------|
 | Temporal Server | Core workflow engine | 7233 |
 | Temporal Web UI | Dashboard for workflows | 8080 |
-| PostgreSQL | Temporal persistence layer | 5432 |
+| Custom PostgreSQL | Temporal persistence layer | 5432 |
+| Database Init Job | Database setup and initialization | - |
 | Temporal Worker | Sample workflow worker | - |
 
+### Deploying Temporal
+
+#### Deploy with Custom PostgreSQL
+
+```bash
+# 1. Deploy custom PostgreSQL instance
+kubectl apply -f k8s/demo-app/temporal-postgres.yaml
+
+# 2. Initialize databases
+kubectl apply -f k8s/demo-app/temporal-db-init.yaml
+
+# 3. Wait for database initialization to complete
+kubectl wait --for=condition=complete job/temporal-db-init -n temporal --timeout=300s
+
+# 4. Deploy Temporal using Helm chart via ArgoCD
+kubectl apply -f k8s/demo-app/temporal-application.yaml
+
+# 5. Deploy sample workflow application
+kubectl apply -f k8s/demo-app/temporal-workflow-app.yaml
+
+# 6. Verify deployment
+kubectl get pods -n temporal
+kubectl get pods -n default -l app=temporal-worker
+```
+
+#### Manual Deployment Steps
+
+```bash
+# Create temporal namespace
+kubectl create namespace temporal
+
+# Deploy PostgreSQL
+kubectl apply -f k8s/demo-app/temporal-postgres.yaml
+
+# Wait for PostgreSQL to be ready
+kubectl wait --for=condition=available --timeout=300s deployment/postgres -n temporal
+
+# Initialize databases
+kubectl apply -f k8s/demo-app/temporal-db-init.yaml
+kubectl wait --for=condition=complete job/temporal-db-init -n temporal --timeout=300s
+
+# Deploy Temporal server
+kubectl apply -f k8s/demo-app/temporal-application.yaml
+
+# Deploy workflow applications
+kubectl apply -f k8s/demo-app/temporal-workflow-app.yaml
+```
 
 ### Accessing Temporal Services
 

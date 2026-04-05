@@ -1,0 +1,58 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: temporal-db-init
+  namespace: temporal
+  annotations:
+    argocd.argoproj.io/sync-wave: '0'
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:15
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h postgres.temporal.svc.cluster.local -p 5432 -U temporal; do
+                echo "Waiting for PostgreSQL to be ready..."
+                sleep 5
+              done
+              echo "PostgreSQL is ready!"
+      containers:
+        - name: db-init
+          image: postgres:15
+          env:
+            - name: PGHOST
+              value: "postgres.temporal.svc.cluster.local"
+            - name: PGPORT
+              value: "5432"
+            - name: PGUSER
+              value: "temporal"
+            - name: PGPASSWORD
+              value: "temporal123"
+          command:
+            - sh
+            - -c
+            - |
+              echo "Creating Temporal databases..."
+              
+              # Create temporal database if it doesn't exist
+              psql -d postgres -c "SELECT 1 FROM pg_database WHERE datname = 'temporal'" | grep -q 1 || psql -d postgres -c "CREATE DATABASE temporal;"
+              
+              # Create temporal_visibility database if it doesn't exist
+              psql -d postgres -c "SELECT 1 FROM pg_database WHERE datname = 'temporal_visibility'" | grep -q 1 || psql -d postgres -c "CREATE DATABASE temporal_visibility;"
+              
+              echo "Databases created successfully!"
+              
+              # List databases to verify
+              psql -d postgres -c "\l"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"

@@ -24,6 +24,34 @@ spec:
 
           config:
             logLevel: info
+            
+            persistence:
+              defaultStore: default
+              visibilityStore: visibility
+              numHistoryShards: 4
+              datastores:
+                default:
+                  sql:
+                    driver: "postgres"
+                    host: "postgres.temporal.svc.cluster.local"
+                    port: 5432
+                    database: "temporal"
+                    user: "temporal"
+                    password: "temporal123"
+                    maxConns: 20
+                    maxIdleConns: 20
+                    maxConnLifetime: "1h"
+                visibility:
+                  sql:
+                    driver: "postgres"
+                    host: "postgres.temporal.svc.cluster.local"
+                    port: 5432
+                    database: "temporal_visibility"
+                    user: "temporal"
+                    password: "temporal123"
+                    maxConns: 10
+                    maxIdleConns: 10
+                    maxConnLifetime: "1h"
         
         web:
           enabled: true
@@ -42,10 +70,7 @@ spec:
             enabled: true
 
         cassandra:
-          config:
-            cluster_size: 1   
-          service:
-            type: ClusterIP 
+          enabled: false
         mysql:
           enabled: false
         
