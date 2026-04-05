@@ -1,0 +1,74 @@
+{
+  "name": "Pod Kill",
+  "type": "kill_pod",
+  "start_time": "2026-04-05T19:22:25.650255",
+  "steps": [
+    {
+      "step": "inject_chaos",
+      "status": "success",
+      "details": {
+        "experiment_id": "chaos-20260405135225",
+        "status": "injected",
+        "details": {
+          "action": "pod_killed",
+          "pod_name": "demo-app-6dff879b66-mpjd2",
+          "namespace": "default"
+        }
+      }
+    },
+    {
+      "step": "wait",
+      "status": "completed",
+      "duration_seconds": 30
+    },
+    {
+      "step": "rca_analysis",
+      "status": "success",
+      "rca_report": {
+        "incident_id": "rca-20260405135302",
+        "timestamp": "2026-04-05T13:53:06.354537",
+        "severity": "low",
+        "incident_type": "pod_crash",
+        "affected_service": "demo-app",
+        "root_cause": "Pod crashed. Root cause requires further investigation of application logs.",
+        "timeline": [],
+        "evidence": {
+          "metrics_count": 0,
+          "logs_count": 0,
+          "traces_count": 0,
+          "key_findings": []
+        },
+        "recommendations": [
+          "Review application logs for crash details",
+          "Check liveness/readiness probe configuration",
+          "Verify application startup sequence and dependencies",
+          "Consider adding init containers for dependency checks"
+        ],
+        "auto_remediation_available": true
+      }
+    }
+  ],
+  "rca_report": {
+    "incident_id": "rca-20260405135302",
+    "timestamp": "2026-04-05T13:53:06.354537",
+    "severity": "low",
+    "incident_type": "pod_crash",
+    "affected_service": "demo-app",
+    "root_cause": "Pod crashed. Root cause requires further investigation of application logs.",
+    "timeline": [],
+    "evidence": {
+      "metrics_count": 0,
+      "logs_count": 0,
+      "traces_count": 0,
+      "key_findings": []
+    },
+    "recommendations": [
+      "Review application logs for crash details",
+      "Check liveness/readiness probe configuration",
+      "Verify application startup sequence and dependencies",
+      "Consider adding init containers for dependency checks"
+    ],
+    "auto_remediation_available": true
+  },
+  "end_time": "2026-04-05T19:23:06.369459"
+}

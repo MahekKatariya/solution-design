@@ -72,6 +72,8 @@ spec:
             - containerPort: 4317   # OTLP gRPC
             - containerPort: 4318   # OTLP HTTP
             - containerPort: 3100
+            - containerPort: 9090
+            - containerPort: 3200
           volumeMounts:
             - name: prometheus-config
               mountPath: /otel-lgtm/prometheus.yaml
@@ -102,3 +104,9 @@ spec:
     - name: loki
       port: 3100
       targetPort: 3100
+    - name: prometheus
+      port: 9090
+      targetPort: 9090
+    - name: tempo
+      port: 3200
+      targetPort: 3200

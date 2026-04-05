@@ -1,0 +1,840 @@
+"""
+AI SRE Agent - Main Application
+Performs automated root cause analysis by querying the observability stack
+"""
+
+import asyncio
+import logging
+from datetime import datetime, timedelta
+from typing import Optional, Dict, Any, List
+from dataclasses import dataclass, field
+from enum import Enum
+
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+import httpx
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(
+    title="AI SRE Agent",
+    description="Automated Root Cause Analysis Agent",
+    version="1.0.0"
+)
+
+
+class IncidentSeverity(str, Enum):
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class IncidentType(str, Enum):
+    POD_CRASH = "pod_crash"
+    HIGH_LATENCY = "high_latency"
+    MEMORY_PRESSURE = "memory_pressure"
+    CPU_THROTTLING = "cpu_throttling"
+    NETWORK_ISSUE = "network_issue"
+    SERVICE_UNAVAILABLE = "service_unavailable"
+
+
+class FailureType(str, Enum):
+    KILL_POD = "kill_pod"
+    INJECT_LATENCY = "inject_latency"
+    CPU_STRESS = "cpu_stress"
+    MEMORY_STRESS = "memory_stress"
+    NETWORK_DELAY = "network_delay"
+
+
+@dataclass
+class MetricData:
+    """Represents a metric data point"""
+    name: str
+    value: float
+    timestamp: datetime
+    labels: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class LogEntry:
+    """Represents a log entry"""
+    timestamp: datetime
+    level: str
+    message: str
+    source: str
+    labels: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class TraceSpan:
+    """Represents a trace span"""
+    trace_id: str
+    span_id: str
+    operation_name: str
+    duration_ms: float
+    status: str
+    timestamps: Dict[str, datetime]
+    tags: Dict[str, str] = field(default_factory=dict)
+
+
+class IncidentRequest(BaseModel):
+    incident_type: str
+    service_name: str
+    namespace: str = "default"
+    severity: str = "high"
+    description: Optional[str] = None
+
+
+class ChaosRequest(BaseModel):
+    failure_type: FailureType
+    target_deployment: str
+    namespace: str = "default"
+    duration_seconds: int = 300
+    intensity: float = 0.5
+
+
+class RCAReport(BaseModel):
+    incident_id: str
+    timestamp: str
+    severity: str
+    incident_type: str
+    affected_service: str
+    root_cause: str
+    timeline: List[Dict[str, Any]]
+    evidence: Dict[str, Any]
+    recommendations: List[str]
+    auto_remediation_available: bool
+
+
+class ObservabilityClient:
+    """Client for interacting with the LGTM stack"""
+    
+    def __init__(self):
+        self.prometheus_url = "http://prometheus.observibility:9090"
+        self.loki_url = "http://loki.observibility:3100"
+        self.tempo_url = "http://tempo.observibility:3200"
+        self.grafana_url = "http://grafana.observibility:3000"
+        self.client = httpx.AsyncClient(timeout=30.0)
+    
+    async def query_prometheus(self, query: str, time_range: int = 3600) -> List[MetricData]:
+        """Query Prometheus for metrics"""
+        try:
+            end_time = datetime.now()
+            start_time = end_time - timedelta(seconds=time_range)
+            
+            response = await self.client.get(
+                f"{self.prometheus_url}/api/v1/query_range",
+                params={
+                    "query": query,
+                    "start": start_time.timestamp(),
+                    "end": end_time.timestamp(),
+                    "step": "15s"
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            metrics = []
+            if data.get("status") == "success" and data.get("data", {}).get("result"):
+                for result in data["data"]["result"]:
+                    for value in result.get("values", []):
+                        metrics.append(MetricData(
+                            name=query,
+                            value=float(value[1]),
+                            timestamp=datetime.fromtimestamp(value[0]),
+                            labels=result.get("metric", {})
+                        ))
+            return metrics
+        except Exception as e:
+            logger.error(f"Prometheus query failed: {e}")
+            return []
+    
+    async def query_loki(self, query: str, time_range: int = 3600, limit: int = 100) -> List[LogEntry]:
+        """Query Loki for logs"""
+        try:
+            end_time = datetime.now()
+            start_time = end_time - timedelta(seconds=time_range)
+            
+            response = await self.client.get(
+                f"{self.loki_url}/loki/api/v1/query_range",
+                params={
+                    "query": query,
+                    "start": int(start_time.timestamp() * 1e9),
+                    "end": int(end_time.timestamp() * 1e9),
+                    "limit": limit
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            logs = []
+            if data.get("status") == "success" and data.get("data", {}).get("result"):
+                for result in data["data"]["result"]:
+                    for value in result.get("values", []):
+                        logs.append(LogEntry(
+                            timestamp=datetime.fromtimestamp(int(value[0]) / 1e9),
+                            level="INFO",  # Default, could be parsed from message
+                            message=value[1],
+                            source=result.get("stream", {}).get("app", "unknown"),
+                            labels=result.get("stream", {})
+                        ))
+            return logs
+        except Exception as e:
+            logger.error(f"Loki query failed: {e}")
+            return []
+    
+    async def query_tempo(self, service_name: str, time_range: int = 3600, limit: int = 50) -> List[TraceSpan]:
+        """Query Tempo for traces"""
+        try:
+            end_time = datetime.now()
+            start_time = end_time - timedelta(seconds=time_range)
+            
+            # Search for traces
+            response = await self.client.get(
+                f"{self.tempo_url}/api/search",
+                params={
+                    "service": service_name,
+                    "start": int(start_time.timestamp()),
+                    "end": int(end_time.timestamp()),
+                    "limit": limit
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            traces = []
+            for trace in data.get("traces", []):
+                traces.append(TraceSpan(
+                    trace_id=trace.get("traceID", ""),
+                    span_id=trace.get("spanID", ""),
+                    operation_name=trace.get("operationName", ""),
+                    duration_ms=trace.get("durationMs", 0),
+                    status=trace.get("statusCode", "OK"),
+                    timestamps={
+                        "start": datetime.fromtimestamp(trace.get("startTime", 0) / 1e9),
+                        "end": datetime.fromtimestamp(trace.get("endTime", 0) / 1e9)
+                    },
+                    tags=trace.get("tags", {})
+                ))
+            return traces
+        except Exception as e:
+            logger.error(f"Tempo query failed: {e}")
+            return []
+    
+    async def close(self):
+        await self.client.aclose()
+
+
+class ChaosEngineer:
+    """Chaos engineering module for failure injection"""
+    
+    def __init__(self):
+        self.kubectl_path = "/usr/bin/kubectl"
+        self.active_experiments: Dict[str, Dict] = {}
+    
+    async def inject_failure(self, request: ChaosRequest) -> Dict[str, Any]:
+        """Inject a failure into the system"""
+        experiment_id = f"chaos-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        
+        try:
+            if request.failure_type == FailureType.KILL_POD:
+                result = await self._kill_pod(request.target_deployment, request.namespace)
+            elif request.failure_type == FailureType.INJECT_LATENCY:
+                result = await self._inject_latency(request.target_deployment, request.namespace, request.intensity)
+            elif request.failure_type == FailureType.CPU_STRESS:
+                result = await self._cpu_stress(request.target_deployment, request.namespace, request.intensity)
+            elif request.failure_type == FailureType.MEMORY_STRESS:
+                result = await self._memory_stress(request.target_deployment, request.namespace, request.intensity)
+            else:
+                raise ValueError(f"Unknown failure type: {request.failure_type}")
+            
+            self.active_experiments[experiment_id] = {
+                "request": request.dict(),
+                "start_time": datetime.now().isoformat(),
+                "status": "running"
+            }
+            
+            return {
+                "experiment_id": experiment_id,
+                "status": "injected",
+                "details": result
+            }
+        except Exception as e:
+            logger.error(f"Failed to inject failure: {e}")
+            raise
+    
+    async def _kill_pod(self, deployment: str, namespace: str) -> Dict[str, Any]:
+        """Kill a random pod from the deployment"""
+        import subprocess
+        
+        # Get pod name
+        result = subprocess.run(
+            [self.kubectl_path, "get", "pods", "-n", namespace, 
+             "-l", f"app={deployment}", "-o", "jsonpath={.items[0].metadata.name}"],
+            capture_output=True, text=True
+        )
+        pod_name = result.stdout.strip()
+        
+        if not pod_name:
+            raise ValueError(f"No pods found for deployment {deployment}")
+        
+        # Delete the pod
+        subprocess.run(
+            [self.kubectl_path, "delete", "pod", pod_name, "-n", namespace],
+            capture_output=True, text=True
+        )
+        
+        return {
+            "action": "pod_killed",
+            "pod_name": pod_name,
+            "namespace": namespace
+        }
+    
+    async def _inject_latency(self, deployment: str, namespace: str, intensity: float) -> Dict[str, Any]:
+        """Inject network latency using tc (traffic control)"""
+        import subprocess
+        
+        latency_ms = int(intensity * 1000)  # Convert to milliseconds
+        
+        # Get pod name
+        result = subprocess.run(
+            [self.kubectl_path, "get", "pods", "-n", namespace,
+             "-l", f"app={deployment}", "-o", "jsonpath={.items[0].metadata.name}"],
+            capture_output=True, text=True
+        )
+        pod_name = result.stdout.strip()
+        
+        if not pod_name:
+            raise ValueError(f"No pods found for deployment {deployment}")
+        
+        # Inject latency using kubectl exec with tc
+        subprocess.run(
+            [self.kubectl_path, "exec", pod_name, "-n", namespace, "--",
+             "tc", "qdisc", "add", "dev", "eth0", "root", "netem", "delay", f"{latency_ms}ms"],
+            capture_output=True, text=True
+        )
+        
+        return {
+            "action": "latency_injected",
+            "pod_name": pod_name,
+            "latency_ms": latency_ms,
+            "namespace": namespace
+        }
+    
+    async def _cpu_stress(self, deployment: str, namespace: str, intensity: float) -> Dict[str, Any]:
+        """Inject CPU stress"""
+        import subprocess
+        
+        cpu_percentage = int(intensity * 100)
+        
+        # Get pod name
+        result = subprocess.run(
+            [self.kubectl_path, "get", "pods", "-n", namespace,
+             "-l", f"app={deployment}", "-o", "jsonpath={.items[0].metadata.name}"],
+            capture_output=True, text=True
+        )
+        pod_name = result.stdout.strip()
+        
+        if not pod_name:
+            raise ValueError(f"No pods found for deployment {deployment}")
+        
+        # Run stress-ng in background
+        subprocess.run(
+            [self.kubectl_path, "exec", pod_name, "-n", namespace, "--",
+             "stress-ng", "--cpu", "1", "--cpu-load", str(cpu_percentage), "--timeout", "300s", "&"],
+            capture_output=True, text=True
+        )
+        
+        return {
+            "action": "cpu_stress_injected",
+            "pod_name": pod_name,
+            "cpu_percentage": cpu_percentage,
+            "namespace": namespace
+        }
+    
+    async def _memory_stress(self, deployment: str, namespace: str, intensity: float) -> Dict[str, Any]:
+        """Inject memory stress"""
+        import subprocess
+        
+        # Get pod name
+        result = subprocess.run(
+            [self.kubectl_path, "get", "pods", "-n", namespace,
+             "-l", f"app={deployment}", "-o", "jsonpath={.items[0].metadata.name}"],
+            capture_output=True, text=True
+        )
+        pod_name = result.stdout.strip()
+        
+        if not pod_name:
+            raise ValueError(f"No pods found for deployment {deployment}")
+        
+        # Run stress-ng memory stress in background
+        subprocess.run(
+            [self.kubectl_path, "exec", pod_name, "-n", namespace, "--",
+             "stress-ng", "--vm", "1", "--vm-bytes", f"{int(intensity * 512)}M", "--timeout", "300s", "&"],
+            capture_output=True, text=True
+        )
+        
+        return {
+            "action": "memory_stress_injected",
+            "pod_name": pod_name,
+            "memory_mb": int(intensity * 512),
+            "namespace": namespace
+        }
+
+
+class RCAEngine:
+    """Root Cause Analysis Engine"""
+    
+    def __init__(self, observability_client: ObservabilityClient):
+        self.observability = observability_client
+        self.known_patterns = self._load_known_patterns()
+    
+    def _load_known_patterns(self) -> Dict[str, Dict]:
+        """Load known failure patterns"""
+        return {
+            "pod_crash": {
+                "metrics": [
+                    "kube_pod_status_phase{phase=\"Failed\"}",
+                    "kube_pod_container_status_restarts_total",
+                    "kube_pod_container_status_terminated_reason"
+                ],
+                "log_patterns": ["error", "exception", "fatal", "crash", "killed", "OOMKilled"],
+                "trace_indicators": ["error", "timeout", "cancelled"]
+            },
+            "high_latency": {
+                "metrics": [
+                    "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))",
+                    "http_request_duration_seconds_sum",
+                    "grpc_server_handling_seconds_bucket"
+                ],
+                "log_patterns": ["timeout", "slow", "latency", "delayed"],
+                "trace_indicators": ["slow", "timeout", "retry"]
+            },
+            "memory_pressure": {
+                "metrics": [
+                    "container_memory_working_set_bytes",
+                    "container_memory_usage_bytes",
+                    "kube_pod_container_status_terminated_reason{reason=\"OOMKilled\"}"
+                ],
+                "log_patterns": ["OOMKilled", "out of memory", "memory", "killed"],
+                "trace_indicators": ["oom", "memory"]
+            },
+            "cpu_throttling": {
+                "metrics": [
+                    "container_cpu_cfs_throttled_seconds_total",
+                    "container_cpu_usage_seconds_total",
+                    "rate(container_cpu_cfs_throttled_seconds_total[5m])"
+                ],
+                "log_patterns": ["throttle", "cpu", "slow"],
+                "trace_indicators": ["throttle", "slow"]
+            }
+        }
+    
+    async def analyze_incident(
+        self,
+        incident_type: str,
+        service_name: str,
+        namespace: str,
+        time_range: int = 1800
+    ) -> RCAReport:
+        """Perform root cause analysis for an incident"""
+        incident_id = f"rca-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        
+        logger.info(f"Starting RCA for incident {incident_id}: {incident_type} in {service_name}")
+        
+        # Collect evidence from observability stack
+        evidence = await self._collect_evidence(incident_type, service_name, namespace, time_range)
+        
+        # Build timeline
+        timeline = self._build_timeline(evidence)
+        
+        # Determine root cause
+        root_cause = await self._determine_root_cause(incident_type, evidence)
+        
+        # Generate recommendations
+        recommendations = self._generate_recommendations(incident_type, root_cause, evidence)
+        
+        # Check if auto-remediation is available
+        auto_remediation = self._check_auto_remediation(incident_type, root_cause)
+        
+        return RCAReport(
+            incident_id=incident_id,
+            timestamp=datetime.now().isoformat(),
+            severity=self._determine_severity(evidence),
+            incident_type=incident_type,
+            affected_service=service_name,
+            root_cause=root_cause,
+            timeline=timeline,
+            evidence={
+                "metrics_count": len(evidence.get("metrics", [])),
+                "logs_count": len(evidence.get("logs", [])),
+                "traces_count": len(evidence.get("traces", [])),
+                "key_findings": evidence.get("key_findings", [])
+            },
+            recommendations=recommendations,
+            auto_remediation_available=auto_remediation
+        )
+    
+    async def _collect_evidence(
+        self,
+        incident_type: str,
+        service_name: str,
+        namespace: str,
+        time_range: int
+    ) -> Dict[str, Any]:
+        """Collect evidence from observability stack"""
+        evidence = {
+            "metrics": [],
+            "logs": [],
+            "traces": [],
+            "key_findings": []
+        }
+        
+        pattern = self.known_patterns.get(incident_type, {})
+        
+        # Collect metrics
+        for metric_query in pattern.get("metrics", []):
+            metric_query_formatted = metric_query.replace("{service}", service_name).replace("{namespace}", namespace)
+            metrics = await self.observability.query_prometheus(metric_query_formatted, time_range)
+            evidence["metrics"].extend(metrics)
+            
+            # Analyze metrics for anomalies
+            if metrics:
+                values = [m.value for m in metrics]
+                avg_value = sum(values) / len(values) if values else 0
+                max_value = max(values) if values else 0
+                
+                if max_value > avg_value * 2:
+                    evidence["key_findings"].append({
+                        "type": "metric_anomaly",
+                        "metric": metric_query,
+                        "finding": f"Spike detected: max {max_value:.2f} vs avg {avg_value:.2f}"
+                    })
+        
+        # Collect logs
+        log_query = f'{{app="{service_name}", namespace="{namespace}"}}'
+        logs = await self.observability.query_loki(log_query, time_range)
+        evidence["logs"].extend(logs)
+        
+        # Analyze logs for error patterns
+        error_logs = []
+        for pattern_str in pattern.get("log_patterns", []):
+            for log in logs:
+                if pattern_str.lower() in log.message.lower():
+                    error_logs.append(log)
+                    evidence["key_findings"].append({
+                        "type": "error_log",
+                        "pattern": pattern_str,
+                        "finding": log.message[:200],
+                        "timestamp": log.timestamp.isoformat()
+                    })
+        
+        # Collect traces
+        traces = await self.observability.query_tempo(service_name, time_range)
+        evidence["traces"].extend(traces)
+        
+        # Analyze traces for errors
+        for trace in traces:
+            if trace.status == "ERROR" or trace.duration_ms > 5000:
+                evidence["key_findings"].append({
+                    "type": "trace_anomaly",
+                    "trace_id": trace.trace_id,
+                    "finding": f"Trace {trace.operation_name} took {trace.duration_ms}ms with status {trace.status}"
+                })
+        
+        return evidence
+    
+    def _build_timeline(self, evidence: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Build incident timeline from evidence"""
+        timeline = []
+        
+        # Add log events to timeline
+        for log in evidence.get("logs", [])[:20]:  # Limit to 20 most recent
+            timeline.append({
+                "timestamp": log.timestamp.isoformat(),
+                "type": "log",
+                "source": log.source,
+                "message": log.message[:200],
+                "level": log.level
+            })
+        
+        # Add key findings to timeline
+        for finding in evidence.get("key_findings", []):
+            if "timestamp" in finding:
+                timeline.append({
+                    "timestamp": finding["timestamp"],
+                    "type": "finding",
+                    "finding": finding["finding"]
+                })
+        
+        # Sort by timestamp
+        timeline.sort(key=lambda x: x.get("timestamp", ""))
+        
+        return timeline[-50:]  # Return last 50 events
+    
+    async def _determine_root_cause(
+        self,
+        incident_type: str,
+        evidence: Dict[str, Any]
+    ) -> str:
+        """Determine the root cause based on evidence"""
+        findings = evidence.get("key_findings", [])
+        
+        if incident_type == "pod_crash":
+            for finding in findings:
+                if "OOMKilled" in finding.get("finding", ""):
+                    return "Pod was killed due to Out of Memory (OOM). The container exceeded its memory limit."
+                if "crash" in finding.get("finding", "").lower():
+                    return "Application crash detected. Check application logs for the specific error."
+            return "Pod crashed. Root cause requires further investigation of application logs."
+        
+        elif incident_type == "high_latency":
+            for finding in findings:
+                if "timeout" in finding.get("finding", "").lower():
+                    return "High latency caused by timeout errors. Check downstream service health and network connectivity."
+                if "slow" in finding.get("finding", "").lower():
+                    return "Performance degradation detected. Check for resource constraints or inefficient queries."
+            return "High latency detected. Root cause requires analysis of service dependencies and resource utilization."
+        
+        elif incident_type == "memory_pressure":
+            for finding in findings:
+                if "OOMKilled" in finding.get("finding", ""):
+                    return "Memory pressure caused OOM kill. Container memory limit is too low for the workload."
+            return "Memory pressure detected. Consider increasing memory limits or optimizing memory usage."
+        
+        elif incident_type == "cpu_throttling":
+            return "CPU throttling detected. Container is hitting CPU limits. Consider increasing CPU requests/limits."
+        
+        return f"Root cause analysis for {incident_type} requires further investigation."
+    
+    def _generate_recommendations(
+        self,
+        incident_type: str,
+        root_cause: str,
+        evidence: Dict[str, Any]
+    ) -> List[str]:
+        """Generate remediation recommendations"""
+        recommendations = []
+        
+        if incident_type == "pod_crash":
+            if "OOM" in root_cause:
+                recommendations.extend([
+                    "Increase container memory limit in deployment spec",
+                    "Enable vertical pod autoscaler (VPA) for automatic resource adjustment",
+                    "Review application memory usage patterns and optimize if possible",
+                    "Set up memory profiling to identify memory leaks"
+                ])
+            else:
+                recommendations.extend([
+                    "Review application logs for crash details",
+                    "Check liveness/readiness probe configuration",
+                    "Verify application startup sequence and dependencies",
+                    "Consider adding init containers for dependency checks"
+                ])
+        
+        elif incident_type == "high_latency":
+            recommendations.extend([
+                "Review database query performance and add indexes if needed",
+                "Check for network latency between services",
+                "Scale up replicas if under heavy load",
+                "Implement caching for frequently accessed data",
+                "Review and optimize slow API endpoints"
+            ])
+        
+        elif incident_type == "memory_pressure":
+            recommendations.extend([
+                "Increase container memory limits",
+                "Enable vertical pod autoscaler (VPA)",
+                "Review and fix potential memory leaks",
+                "Implement memory limits at namespace level",
+                "Consider splitting the service into smaller components"
+            ])
+        
+        elif incident_type == "cpu_throttling":
+            recommendations.extend([
+                "Increase CPU requests and limits",
+                "Enable vertical pod autoscaler (VPA)",
+                "Optimize CPU-intensive operations",
+                "Consider horizontal scaling (HPA) to distribute load"
+            ])
+        
+        return recommendations
+    
+    def _check_auto_remediation(self, incident_type: str, root_cause: str) -> bool:
+        """Check if auto-remediation is available for this incident type"""
+        auto_remediable = ["pod_crash", "cpu_throttling"]
+        return incident_type in auto_remediable
+    
+    def _determine_severity(self, evidence: Dict[str, Any]) -> str:
+        """Determine incident severity based on evidence"""
+        findings = evidence.get("key_findings", [])
+        
+        # Count critical findings
+        critical_count = sum(1 for f in findings if "error" in f.get("type", "").lower())
+        
+        if critical_count >= 5:
+            return "critical"
+        elif critical_count >= 3:
+            return "high"
+        elif critical_count >= 1:
+            return "medium"
+        return "low"
+
+
+# Global instances
+observability_client = ObservabilityClient()
+chaos_engineer = ChaosEngineer()
+rca_engine = RCAEngine(observability_client)
+
+
+@app.get("/")
+async def root():
+    return {"message": "AI SRE Agent API", "version": "1.0.0"}
+
+
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
+
+
+@app.post("/api/v1/chaos/inject")
+async def inject_chaos(request: ChaosRequest, background_tasks: BackgroundTasks):
+    """Inject a failure for testing"""
+    try:
+        result = await chaos_engineer.inject_failure(request)
+        return JSONResponse(content=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/rca/analyze")
+async def analyze_incident(request: IncidentRequest):
+    """Perform root cause analysis for an incident"""
+    try:
+        report = await rca_engine.analyze_incident(
+            incident_type=request.incident_type,
+            service_name=request.service_name,
+            namespace=request.namespace
+        )
+        return JSONResponse(content=report.dict())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/chaos/demo")
+async def run_chaos_demo(background_tasks: BackgroundTasks):
+    """Run a full chaos engineering demo with RCA"""
+    demo_id = f"demo-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    
+    async def run_demo():
+        logger.info(f"Starting chaos demo {demo_id}")
+        
+        # Step 1: Inject failure
+        chaos_request = ChaosRequest(
+            failure_type=FailureType.KILL_POD,
+            target_deployment="temporal-worker",
+            namespace="default",
+            duration_seconds=60
+        )
+        
+        try:
+            chaos_result = await chaos_engineer.inject_failure(chaos_request)
+            logger.info(f"Chaos injected: {chaos_result}")
+        except Exception as e:
+            logger.error(f"Failed to inject chaos: {e}")
+            return
+        
+        # Wait for incident to propagate
+        await asyncio.sleep(30)
+        
+        # Step 2: Perform RCA
+        rca_report = await rca_engine.analyze_incident(
+            incident_type="pod_crash",
+            service_name="temporal-worker",
+            namespace="default"
+        )
+        
+        logger.info(f"RCA Report generated: {rca_report.incident_id}")
+        logger.info(f"Root Cause: {rca_report.root_cause}")
+        logger.info(f"Recommendations: {rca_report.recommendations}")
+    
+    background_tasks.add_task(run_demo)
+    
+    return {
+        "demo_id": demo_id,
+        "status": "started",
+        "message": "Chaos demo started. Check logs for progress."
+    }
+
+
+@app.get("/api/v1/metrics/query")
+async def query_metrics(query: str, time_range: int = 3600):
+    """Query Prometheus metrics"""
+    metrics = await observability_client.query_prometheus(query, time_range)
+    return {
+        "query": query,
+        "count": len(metrics),
+        "data": [
+            {
+                "timestamp": m.timestamp.isoformat(),
+                "value": m.value,
+                "labels": m.labels
+            }
+            for m in metrics[:100]  # Limit response size
+        ]
+    }
+
+
+@app.get("/api/v1/logs/query")
+async def query_logs(query: str, time_range: int = 3600, limit: int = 100):
+    """Query Loki logs"""
+    logs = await observability_client.query_loki(query, time_range, limit)
+    return {
+        "query": query,
+        "count": len(logs),
+        "data": [
+            {
+                "timestamp": l.timestamp.isoformat(),
+                "level": l.level,
+                "message": l.message,
+                "source": l.source
+            }
+            for l in logs
+        ]
+    }
+
+
+@app.get("/api/v1/traces/query")
+async def query_traces(service: str, time_range: int = 3600):
+    """Query Tempo traces"""
+    traces = await observability_client.query_tempo(service, time_range)
+    return {
+        "service": service,
+        "count": len(traces),
+        "data": [
+            {
+                "trace_id": t.trace_id,
+                "operation": t.operation_name,
+                "duration_ms": t.duration_ms,
+                "status": t.status
+            }
+            for t in traces
+        ]
+    }
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await observability_client.close()
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8080)
