@@ -40,8 +40,10 @@ spec:
             enabled: true
           update:
             enabled: true
-        
-        
+
+        cassandra:
+          config:
+            cluster_size: 1    
         mysql:
           enabled: false
         
