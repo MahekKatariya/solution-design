@@ -1,66 +1,66 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: temporal
-  annotations:
-    argocd.argoproj.io/sync-wave: '-10'
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: temporal
-  namespace: argocd
-spec:
-  project: default
+# apiVersion: v1
+# kind: Namespace
+# metadata:
+#   name: temporal
+#   annotations:
+#     argocd.argoproj.io/sync-wave: '-10'
+# ---
+# apiVersion: argoproj.io/v1alpha1
+# kind: Application
+# metadata:
+#   name: temporal
+#   namespace: argocd
+# spec:
+#   project: default
   
-  source:
-    repoURL: https://go.temporal.io/helm-charts
-    chart: temporal
-    targetRevision: 0.37.0
-    helm:
-      values: |
-        server:
-          replicaCount: 1
+#   source:
+#     repoURL: https://go.temporal.io/helm-charts
+#     chart: temporal
+#     targetRevision: 0.37.0
+#     helm:
+#       values: |
+#         server:
+#           replicaCount: 1
 
-          config:
-            logLevel: info
+#           config:
+#             logLevel: info
         
-        web:
-          enabled: true
-          replicaCount: 1
-          service:
-            type: ClusterIP
-            port: 8080
+#         web:
+#           enabled: true
+#           replicaCount: 1
+#           service:
+#             type: ClusterIP
+#             port: 8080
         
-        postgresql:
-          enabled: false
+#         postgresql:
+#           enabled: false
         
-        schema:
-          setup:
-            enabled: true
-          update:
-            enabled: true
+#         schema:
+#           setup:
+#             enabled: true
+#           update:
+#             enabled: true
 
-        cassandra:
-          config:
-            cluster_size: 1    
-        mysql:
-          enabled: false
+#         cassandra:
+#           config:
+#             cluster_size: 1    
+#         mysql:
+#           enabled: false
         
-        elasticsearch:
-          enabled: false
+#         elasticsearch:
+#           enabled: false
         
-        prometheus:
-          enabled: false
+#         prometheus:
+#           enabled: false
         
-        grafana:
-          enabled: false
+#         grafana:
+#           enabled: false
 
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: temporal
+#   destination:
+#     server: https://kubernetes.default.svc
+#     namespace: temporal
 
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
+#   syncPolicy:
+#     automated:
+#       prune: true
+#       selfHeal: true
