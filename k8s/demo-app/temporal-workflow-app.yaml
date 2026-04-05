@@ -31,8 +31,8 @@ spec:
             - /bin/bash
             - -c
             - |
-              pip install temporalio opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp opentelemetry-instrumentation-temporalio
-              python -c "
+              pip install temporalio opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp
+              python -c '
               import asyncio
               import logging
               import os
@@ -40,38 +40,34 @@ spec:
               from temporalio import activity, workflow
               from temporalio.client import Client
               from temporalio.worker import Worker
-              
-              # OpenTelemetry imports
+              from temporalio.contrib.opentelemetry import TracingInterceptor
+
               from opentelemetry import trace
               from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
               from opentelemetry.sdk.trace import TracerProvider
               from opentelemetry.sdk.trace.export import BatchSpanProcessor
               from opentelemetry.sdk.resources import Resource
-              from opentelemetry.instrumentation.temporalio import TemporalioInstrumentor
-              
+
               logging.basicConfig(level=logging.INFO)
-              
+
               # Initialize OpenTelemetry tracing
               resource = Resource.create({
                   "service.name": os.getenv("OTEL_SERVICE_NAME", "temporal-worker"),
                   "service.version": "1.0.0"
               })
-              
+
               trace.set_tracer_provider(TracerProvider(resource=resource))
               tracer = trace.get_tracer(__name__)
-              
+
               # Configure OTLP exporter
               otlp_exporter = OTLPSpanExporter(
                   endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://lgtm.observibility:4317"),
                   insecure=True
               )
-              
+
               span_processor = BatchSpanProcessor(otlp_exporter)
               trace.get_tracer_provider().add_span_processor(span_processor)
-              
-              # Instrument Temporal
-              TemporalioInstrumentor().instrument()
-              
+
               @activity.defn
               async def say_hello(name: str) -> str:
                   with tracer.start_as_current_span("say_hello_activity") as span:
@@ -79,41 +75,38 @@ spec:
                       result = f"Hello, {name}!"
                       span.set_attribute("activity.output", result)
                       return result
-              
+
               @activity.defn
               async def process_data(data: str) -> str:
                   with tracer.start_as_current_span("process_data_activity") as span:
                       span.set_attribute("activity.input", data)
                       span.set_attribute("processing.duration_seconds", 2)
-                      
-                      # Simulate some data processing
                       await asyncio.sleep(2)
-                      
                       result = f"Processed: {data}"
                       span.set_attribute("activity.output", result)
                       return result
-              
+
               @workflow.defn
               class SampleWorkflow:
                   @workflow.run
                   async def run(self, name: str) -> str:
-                      # Execute activities
                       greeting = await workflow.execute_activity(
                           say_hello,
                           name,
                           start_to_close_timeout=timedelta(seconds=10),
                       )
-                      
                       processed = await workflow.execute_activity(
                           process_data,
                           f"data for {name}",
                           start_to_close_timeout=timedelta(seconds=30),
                       )
-                      
                       return f"{greeting} {processed}"
-              
+
               async def main():
-                  client = await Client.connect("temporal-frontend.temporal:7233")
+                  client = await Client.connect(
+                      "temporal-frontend.temporal:7233",
+                      interceptors=[TracingInterceptor()],
+                  )
                   
                   worker = Worker(
                       client,
@@ -124,10 +117,10 @@ spec:
                   
                   print("Starting worker...")
                   await worker.run()
-              
+
               if __name__ == "__main__":
                   asyncio.run(main())
-              "
+              '
           resources:
             requests:
               memory: "128Mi"
@@ -170,54 +163,52 @@ spec:
             - /bin/bash
             - -c
             - |
-              pip install temporalio opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp opentelemetry-instrumentation-temporalio
-              python -c "
+              pip install temporalio opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp
+              python -c '
               import asyncio
               import logging
               import os
+              import time
+              from datetime import timedelta
               from temporalio.client import Client
               from temporalio.common import RetryPolicy
-              from datetime import timedelta
-              import time
-              
-              # OpenTelemetry imports
+              from temporalio.contrib.opentelemetry import TracingInterceptor
+
               from opentelemetry import trace
               from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
               from opentelemetry.sdk.trace import TracerProvider
               from opentelemetry.sdk.trace.export import BatchSpanProcessor
               from opentelemetry.sdk.resources import Resource
-              from opentelemetry.instrumentation.temporalio import TemporalioInstrumentor
-              
+
               logging.basicConfig(level=logging.INFO)
-              
+
               # Initialize OpenTelemetry tracing
               resource = Resource.create({
                   "service.name": os.getenv("OTEL_SERVICE_NAME", "temporal-workflow-starter"),
                   "service.version": "1.0.0"
               })
-              
+
               trace.set_tracer_provider(TracerProvider(resource=resource))
               tracer = trace.get_tracer(__name__)
-              
+
               # Configure OTLP exporter
               otlp_exporter = OTLPSpanExporter(
                   endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://lgtm.observibility:4317"),
                   insecure=True
               )
-              
+
               span_processor = BatchSpanProcessor(otlp_exporter)
               trace.get_tracer_provider().add_span_processor(span_processor)
-              
-              # Instrument Temporal
-              TemporalioInstrumentor().instrument()
-              
+
               async def main():
-                  client = await Client.connect("temporal-frontend.temporal:7233")
+                  client = await Client.connect(
+                      "temporal-frontend.temporal:7233",
+                      interceptors=[TracingInterceptor()],
+                  )
                   
                   while True:
                       with tracer.start_as_current_span("workflow_execution_cycle") as span:
                           try:
-                              # Start a workflow
                               workflow_id = f"sample-workflow-{int(time.time())}"
                               
                               with tracer.start_as_current_span("start_workflow") as start_span:
@@ -239,7 +230,6 @@ spec:
                                   
                                   print(f"Started workflow {workflow_id}")
                               
-                              # Wait for result
                               with tracer.start_as_current_span("await_workflow_result") as result_span:
                                   result_span.set_attribute("workflow.id", workflow_id)
                                   result = await handle.result()
@@ -253,12 +243,11 @@ spec:
                               span.set_attribute("error.message", str(e))
                               print(f"Error: {e}")
                           
-                          # Wait before starting next workflow
                           await asyncio.sleep(30)
-              
+
               if __name__ == "__main__":
                   asyncio.run(main())
-              "
+              '
           resources:
             requests:
               memory: "128Mi"
