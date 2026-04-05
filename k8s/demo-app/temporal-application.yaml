@@ -26,9 +26,6 @@ spec:
             logLevel: info
             
             persistence:
-              defaultStore: default
-              visibilityStore: visibility
-              numHistoryShards: 4
               datastores:
                 default:
                   sql:
